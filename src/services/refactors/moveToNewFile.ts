@@ -15,6 +15,21 @@ namespace ts.refactor {
         }
     });
 
+    function getIdentifierOfVariableStatement(statement: Statement): Identifier | undefined {
+        if (!isVariableStatement(statement)) return undefined;
+        // Multiple assignment is not supported.
+        if (statement.declarationList.declarations.length !== 1) return undefined;
+
+        const declaration = statement.declarationList.declarations[0];
+        if (declaration.initializer && isIdentifier(declaration.name)) return declaration.name;
+        return undefined;
+    }
+
+    function getNameOfStatement(statement: Statement): DeclarationName | undefined {
+        if (isNamedDeclaration(statement)) return statement.name;
+        return getIdentifierOfVariableStatement(statement);
+    }
+
     interface RangeToMove { readonly toMove: ReadonlyArray<Statement>; readonly afterLast: Statement | undefined; }
     function getRangeToMove(context: RefactorContext): RangeToMove | undefined {
         const { file } = context;
@@ -25,7 +40,8 @@ namespace ts.refactor {
         if (startNodeIndex === -1) return undefined;
 
         const startStatement = statements[startNodeIndex];
-        if (isNamedDeclaration(startStatement) && startStatement.name && rangeContainsRange(startStatement.name, range)) {
+        const nameOfStatement = getNameOfStatement(startStatement);
+        if (nameOfStatement && rangeContainsRange(nameOfStatement, range)) {
             return { toMove: [statements[startNodeIndex]], afterLast: statements[startNodeIndex + 1] };
         }
 
