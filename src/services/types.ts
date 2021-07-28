@@ -60,6 +60,7 @@ namespace ts {
         getNonNullableType(): Type;
         /*@internal*/ getNonOptionalType(): Type;
         /*@internal*/ isNullableType(): boolean;
+        /*@internal*/ hasCallSignature(): boolean;
         getConstraint(): Type | undefined;
         getDefault(): Type | undefined;
 

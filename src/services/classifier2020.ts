@@ -177,7 +177,7 @@ namespace ts.classifier.v2020 {
                 if (typeIdx !== TokenType.parameter && test(t => t.getConstructSignatures().length > 0)) {
                     return TokenType.class;
                 }
-                if (test(t => t.getCallSignatures().length > 0) && !test(t => t.getProperties().length > 0) || isExpressionInCallExpression(node)) {
+                if (test(t => t.hasCallSignature()) && !test(t => t.getProperties().length > 0) || isExpressionInCallExpression(node)) {
                     return typeIdx === TokenType.property ? TokenType.member : TokenType.function;
                 }
             }

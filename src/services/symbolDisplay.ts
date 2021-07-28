@@ -31,7 +31,7 @@ namespace ts.SymbolDisplay {
         if (roots.length === 1
             && first(roots).flags & SymbolFlags.Method
             // Ensure the mapped version is still a method, as opposed to `{ [K in keyof I]: number }`.
-            && typeChecker.getTypeOfSymbolAtLocation(symbol, location).getNonNullableType().getCallSignatures().length !== 0) {
+            && typeChecker.getTypeOfSymbolAtLocation(symbol, location).getNonNullableType().hasCallSignature()) {
             return ScriptElementKind.memberFunctionElement;
         }
 
@@ -76,7 +76,7 @@ namespace ts.SymbolDisplay {
                     // If this was union of all methods,
                     // make sure it has call signatures before we can label it as method
                     const typeOfUnionProperty = typeChecker.getTypeOfSymbolAtLocation(symbol, location);
-                    if (typeOfUnionProperty.getCallSignatures().length) {
+                    if (typeOfUnionProperty.hasCallSignature()) {
                         return ScriptElementKind.memberFunctionElement;
                     }
                     return ScriptElementKind.memberVariableElement;

@@ -455,6 +455,9 @@ namespace ts {
         getNonNullableType(): Type {
             return this.checker.getNonNullableType(this);
         }
+        hasCallSignature(): boolean {
+            return this.checker.getSignaturesOfType(this, SignatureKind.Call).length > 0;
+        }
         getNonOptionalType(): Type {
             return this.checker.getNonOptionalType(this);
         }
