@@ -160,7 +160,7 @@ namespace ts { // eslint-disable-line one-namespace-per-file
                             time: number = 1000 * timestamp()) {
 
             // In server mode, there's no easy way to dump type information, so we drop events that would require it.
-            if (mode === "server" && phase === Phase.CheckTypes) return;
+            // if (mode === "server" && phase === Phase.CheckTypes) return;
 
             performance.mark("beginTracing");
             fs.writeSync(traceFd, `,\n{"pid":1,"tid":1,"ph":"${eventType}","cat":"${phase}","ts":${time},"name":"${name}"`);
