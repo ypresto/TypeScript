@@ -11343,6 +11343,11 @@ namespace ts {
         }
 
         function getConstraintOfDistributiveConditionalType(type: ConditionalType): Type | undefined {
+            tracing?.push(tracing.Phase.CheckTypes, "getConstraintOfDistributiveConditionalType", {
+                id: type.id,
+                kind: type.root.node.kind, pos: type.root.node.pos, end: type.root.node.end,
+                name: type.aliasSymbol?.escapedName ?? type.symbol?.escapedName ?? "(unknown)",
+            });
             // Check if we have a conditional type of the form 'T extends U ? X : Y', where T is a constrained
             // type parameter. If so, create an instantiation of the conditional type where T is replaced
             // with its constraint. We do this because if the constraint is a union type it will be distributed
@@ -11360,10 +11365,12 @@ namespace ts {
                 if (constraint && constraint !== type.checkType) {
                     const instantiated = getConditionalTypeInstantiation(type, prependTypeMapping(type.root.checkType, constraint, type.mapper));
                     if (!(instantiated.flags & TypeFlags.Never)) {
+                        tracing?.pop();
                         return instantiated;
                     }
                 }
             }
+            tracing?.pop();
             return undefined;
         }
 
@@ -16122,7 +16129,17 @@ namespace ts {
                 const checkType = <TypeParameter>root.checkType;
                 const instantiatedType = getMappedType(checkType, mapper);
                 if (checkType !== instantiatedType && instantiatedType.flags & (TypeFlags.Union | TypeFlags.Never)) {
-                    return mapTypeWithAlias(instantiatedType, t => getConditionalType(root, prependTypeMapping(checkType, t, mapper)), aliasSymbol, aliasTypeArguments);
+                    tracing?.push(tracing.Phase.CheckTypes, "getConditionalTypeInstantiation: distribution", {
+                        id: checkType.id,
+                        path: getSourceFileOfNode(root.node).path,
+                        pos: root.node.pos, end: root.node.end,
+                        name: getTextOfNode(root.node),
+                    });
+
+                    const result = mapTypeWithAlias(instantiatedType, t => getConditionalType(root, prependTypeMapping(checkType, t, mapper)), aliasSymbol, aliasTypeArguments);
+
+                    tracing?.pop();
+                    return result
                 }
             }
             return getConditionalType(root, mapper, aliasSymbol, aliasTypeArguments);
@@ -16131,7 +16148,13 @@ namespace ts {
         function instantiateType(type: Type, mapper: TypeMapper | undefined): Type;
         function instantiateType(type: Type | undefined, mapper: TypeMapper | undefined): Type | undefined;
         function instantiateType(type: Type | undefined, mapper: TypeMapper | undefined): Type | undefined {
-            return type && mapper ? instantiateTypeWithAlias(type, mapper, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined) : type;
+            tracing?.push(tracing.Phase.CheckTypes, "instantiateType", {
+                id: type?.id,
+                name: type?.symbol ? symbolName(type.symbol) : "(unknown)",
+            });
+            const result = type && mapper ? instantiateTypeWithAlias(type, mapper, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined) : type;
+            tracing?.pop();
+            return result;
         }
 
         function instantiateTypeWithAlias(type: Type, mapper: TypeMapper, aliasSymbol: Symbol | undefined, aliasTypeArguments: readonly Type[] | undefined): Type {
@@ -20856,7 +20879,7 @@ namespace ts {
         }
 
         function* getUnmatchedProperties(source: Type, target: Type, requireOptionalProperties: boolean, matchDiscriminantProperties: boolean): IterableIterator<Symbol> {
-            const properties = getPropertiesOfType(target);
+            const properties = getPropertiesOfType(target); // TODO: ypresto We can try non-instantiated members of types at first to reduce instantiation while chooseOverload.
             for (const targetProp of properties) {
                 // TODO: remove this when we support static private identifier fields and find other solutions to get privateNamesAndStaticFields test to pass
                 if (isStaticPrivateIdentifierProperty(targetProp)) {
@@ -28956,7 +28979,15 @@ namespace ts {
                 }
 
                 for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
+                    if (candidateIndex > 0) tracing?.pop()
                     const candidate = candidates[candidateIndex];
+
+                    tracing?.push(tracing.Phase.Check, "chooseOverload-candidate", {
+                        candidateIndex,
+                        signature: candidate.declaration ? getTextOfNode(candidate.declaration) : "(unknown)",
+                        pos: candidate.declaration?.pos, end: candidate.declaration?.end,
+                    });
+
                     if (!hasCorrectTypeArgumentArity(candidate, typeArguments) || !hasCorrectArity(node, args, candidate, signatureHelpTrailingComma)) {
                         continue;
                     }
@@ -29016,9 +29047,11 @@ namespace ts {
                         }
                     }
                     candidates[candidateIndex] = checkCandidate;
+                    tracing?.pop()
                     return checkCandidate;
                 }
 
+                tracing?.pop()
                 return undefined;
             }
         }
@@ -32669,7 +32702,7 @@ namespace ts {
         }
 
         function checkExpression(node: Expression | QualifiedName, checkMode?: CheckMode, forceTuple?: boolean): Type {
-            tracing?.push(tracing.Phase.Check, "checkExpression", { kind: node.kind, pos: node.pos, end: node.end });
+            tracing?.push(tracing.Phase.Check, "checkExpression", { kind: node.kind, pos: node.pos, end: node.end, text: getTextOfNode(node) });
             const saveCurrentNode = currentNode;
             currentNode = node;
             instantiationCount = 0;
@@ -38450,11 +38483,13 @@ namespace ts {
 
         function checkSourceElement(node: Node | undefined): void {
             if (node) {
+                tracing?.push(tracing.Phase.Check, "checkSourceElement", { kind: node.kind, pos: node.pos, end: node.end, text: ts.getTextOfNode(node).slice(0, 30) });
                 const saveCurrentNode = currentNode;
                 currentNode = node;
                 instantiationCount = 0;
                 checkSourceElementWorker(node);
                 currentNode = saveCurrentNode;
+                tracing?.pop()
             }
         }
 
