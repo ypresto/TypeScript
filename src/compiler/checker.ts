@@ -4409,6 +4409,7 @@ namespace ts {
         }
 
         function typeToString(type: Type, enclosingDeclaration?: Node, flags: TypeFormatFlags = TypeFormatFlags.AllowUniqueESSymbolType | TypeFormatFlags.UseAliasDefinedOutsideCurrentScope, writer: EmitTextWriter = createTextWriter("")): string {
+            const instantiationCountSnapshot = instantiationCount;
             const noTruncation = compilerOptions.noErrorTruncation || flags & TypeFormatFlags.NoTruncation;
             const typeNode = nodeBuilder.typeToTypeNode(type, enclosingDeclaration, toNodeBuilderFlags(flags) | NodeBuilderFlags.IgnoreErrors | (noTruncation ? NodeBuilderFlags.NoTruncation : 0), writer);
             if (typeNode === undefined) return Debug.fail("should always get typenode");
@@ -4421,6 +4422,10 @@ namespace ts {
             const maxLength = noTruncation ? noTruncationMaximumTruncationLength * 2 : defaultMaximumTruncationLength * 2;
             if (maxLength && result && result.length >= maxLength) {
                 return result.substr(0, maxLength - "...".length) + "...";
+            }
+            // ypresto patch
+            if (instantiationCount > instantiationCountSnapshot) {
+                tracing?.instant(tracing.Phase.CheckTypes, "typeToString_instantiationCountIncreased", { before: instantiationCountSnapshot, after: instantiationCount, result });
             }
             return result;
         }
@@ -11343,10 +11348,14 @@ namespace ts {
         }
 
         function getConstraintOfDistributiveConditionalType(type: ConditionalType): Type | undefined {
+            // ypresto patch
             tracing?.push(tracing.Phase.CheckTypes, "getConstraintOfDistributiveConditionalType", {
                 id: type.id,
                 kind: type.root.node.kind, pos: type.root.node.pos, end: type.root.node.end,
-                name: type.aliasSymbol?.escapedName ?? type.symbol?.escapedName ?? "(unknown)",
+                // name: type.aliasSymbol?.escapedName ?? type.symbol?.escapedName ?? "(unknown)",
+                // name: symbolName(type.symbol),
+                text: getTextOfNode(type.root.node),
+                path: getSourceFileOfNode(type.root.node).path,
             });
             // Check if we have a conditional type of the form 'T extends U ? X : Y', where T is a constrained
             // type parameter. If so, create an instantiation of the conditional type where T is replaced
@@ -15618,7 +15627,16 @@ namespace ts {
         }
 
         function getTypeFromTypeNode(node: TypeNode): Type {
-            return getConditionalFlowTypeOfType(getTypeFromTypeNodeWorker(node), node);
+            // ypresto patch, but shown up in trace...
+            tracing?.push(tracing.Phase.CheckTypes, "getTypeFromTypeNodeWorker", {
+                pos: node.pos,
+                end: node.end,
+                text: getTextOfNode(node),
+                path: getSourceFileOfNode(node).path,
+            });
+            const result = getTypeFromTypeNodeWorker(node);
+            tracing?.pop();
+            return getConditionalFlowTypeOfType(result, node);
         }
 
         function getTypeFromTypeNodeWorker(node: TypeNode): Type {
@@ -16129,6 +16147,7 @@ namespace ts {
                 const checkType = <TypeParameter>root.checkType;
                 const instantiatedType = getMappedType(checkType, mapper);
                 if (checkType !== instantiatedType && instantiatedType.flags & (TypeFlags.Union | TypeFlags.Never)) {
+                    // ypresto patch
                     tracing?.push(tracing.Phase.CheckTypes, "getConditionalTypeInstantiation: distribution", {
                         id: checkType.id,
                         path: getSourceFileOfNode(root.node).path,
@@ -16139,7 +16158,7 @@ namespace ts {
                     const result = mapTypeWithAlias(instantiatedType, t => getConditionalType(root, prependTypeMapping(checkType, t, mapper)), aliasSymbol, aliasTypeArguments);
 
                     tracing?.pop();
-                    return result
+                    return result;
                 }
             }
             return getConditionalType(root, mapper, aliasSymbol, aliasTypeArguments);
@@ -16148,12 +16167,12 @@ namespace ts {
         function instantiateType(type: Type, mapper: TypeMapper | undefined): Type;
         function instantiateType(type: Type | undefined, mapper: TypeMapper | undefined): Type | undefined;
         function instantiateType(type: Type | undefined, mapper: TypeMapper | undefined): Type | undefined {
-            tracing?.push(tracing.Phase.CheckTypes, "instantiateType", {
-                id: type?.id,
-                name: type?.symbol ? symbolName(type.symbol) : "(unknown)",
-            });
+            // tracing?.push(tracing.Phase.CheckTypes, "instantiateType", {
+            //     id: type?.id,
+            //     name: type?.symbol ? symbolName(type.symbol) : "(unknown)",
+            // });
             const result = type && mapper ? instantiateTypeWithAlias(type, mapper, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined) : type;
-            tracing?.pop();
+            // tracing?.pop();
             return result;
         }
 
@@ -16172,7 +16191,13 @@ namespace ts {
             totalInstantiationCount++;
             instantiationCount++;
             instantiationDepth++;
+            tracing?.push(tracing.Phase.CheckTypes, "instantiateTypeWorker", {
+                id: type.id,
+                // name: symbolName(type.symbol),
+                // printedName: typeToString(type),
+            });
             const result = instantiateTypeWorker(type, mapper, aliasSymbol, aliasTypeArguments);
+            tracing?.pop();
             instantiationDepth--;
             return result;
         }
@@ -18232,7 +18257,11 @@ namespace ts {
             }
 
             function structuredTypeRelatedTo(source: Type, target: Type, reportErrors: boolean, intersectionState: IntersectionState): Ternary {
-                tracing?.push(tracing.Phase.CheckTypes, "structuredTypeRelatedTo", { sourceId: source.id, targetId: target.id });
+                tracing?.push(tracing.Phase.CheckTypes, "structuredTypeRelatedTo", { sourceId: source.id, targetId: target.id,
+                    // ypresto patch
+                    // sourceName: symbolName(source.symbol),
+                    // targetName: symbolName(target.symbol),
+                });
                 const result = structuredTypeRelatedToWorker(source, target, reportErrors, intersectionState);
                 tracing?.pop();
                 return result;
@@ -28979,9 +29008,11 @@ namespace ts {
                 }
 
                 for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
-                    if (candidateIndex > 0) tracing?.pop()
+                    // ypresto patch: pop trace of previous iteration
+                    if (candidateIndex > 0) tracing?.pop();
                     const candidate = candidates[candidateIndex];
 
+                    // ypresto patch
                     tracing?.push(tracing.Phase.Check, "chooseOverload-candidate", {
                         candidateIndex,
                         signature: candidate.declaration ? getTextOfNode(candidate.declaration) : "(unknown)",
@@ -29047,7 +29078,7 @@ namespace ts {
                         }
                     }
                     candidates[candidateIndex] = checkCandidate;
-                    tracing?.pop()
+                    tracing?.pop();
                     return checkCandidate;
                 }
 
@@ -38483,6 +38514,7 @@ namespace ts {
 
         function checkSourceElement(node: Node | undefined): void {
             if (node) {
+                // ypresto patch
                 tracing?.push(tracing.Phase.Check, "checkSourceElement", { kind: node.kind, pos: node.pos, end: node.end, text: ts.getTextOfNode(node).slice(0, 30) });
                 const saveCurrentNode = currentNode;
                 currentNode = node;
