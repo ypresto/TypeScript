@@ -19899,6 +19899,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (!result) {
                 const newMapper = createTypeMapper(root.outerTypeParameters, typeArguments);
                 const checkType = root.checkType;
+
+                // ypresto patch
+                tracing?.push(tracing.Phase.CheckTypes, "getConditionalTypeInstantiation", {
+                    id: checkType.id,
+                    path: getSourceFileOfNode(root.node).path,
+                    pos: root.node.pos, end: root.node.end,
+                    name: getTextOfNode(root.node),
+                    // TODO: show distributionType
+                });
+
                 const distributionType = root.isDistributive ? getReducedType(getMappedType(checkType, newMapper)) : undefined;
                 // Distributive conditional types are distributed over union types. For example, when the
                 // distributive conditional type T extends U ? X : Y is instantiated with A | B for T, the
@@ -19906,6 +19916,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 result = distributionType && checkType !== distributionType && distributionType.flags & (TypeFlags.Union | TypeFlags.Never) ?
                     mapTypeWithAlias(distributionType, t => getConditionalType(root, prependTypeMapping(checkType, t, newMapper), forConstraint), aliasSymbol, aliasTypeArguments) :
                     getConditionalType(root, newMapper, forConstraint, aliasSymbol, aliasTypeArguments);
+
+                tracing?.pop();
+
                 root.instantiations!.set(id, result);
             }
             return result;
@@ -19934,7 +19947,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         totalInstantiationCount++;
         instantiationCount++;
         instantiationDepth++;
+        tracing?.push(tracing.Phase.CheckTypes, "instantiateTypeWorker", {
+            id: type.id,
+            name: (type.aliasSymbol ?? type.symbol)?.escapedName.toString(),
+            instantiationDepth,
+            instantiationCount,
+        });
         const result = instantiateTypeWorker(type, mapper, aliasSymbol, aliasTypeArguments);
+        tracing?.pop();
         instantiationDepth--;
         return result;
     }
@@ -22241,7 +22261,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 result = Ternary.Maybe;
             }
             else {
-                tracing?.push(tracing.Phase.CheckTypes, "structuredTypeRelatedTo", { sourceId: source.id, targetId: target.id });
+                tracing?.push(tracing.Phase.CheckTypes, "structuredTypeRelatedTo", { sourceId: source.id, targetId: target.id,
+                    // ypresto patch
+                    sourceName: (source.aliasSymbol ?? source.symbol)?.escapedName.toString(),
+                    targetName: (target.aliasSymbol ?? target.symbol)?.escapedName.toString(),
+                });
                 result = structuredTypeRelatedTo(source, target, reportErrors, intersectionState);
                 tracing?.pop();
             }
@@ -39482,7 +39506,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function checkExpression(node: Expression | QualifiedName, checkMode?: CheckMode, forceTuple?: boolean): Type {
-        tracing?.push(tracing.Phase.Check, "checkExpression", { kind: node.kind, pos: node.pos, end: node.end, path: (node as TracingNode).tracingPath });
+        // ypresto patch
+        if (tracing) {
+            let text = getTextOfNode(node)
+            const maxLength = defaultMaximumTruncationLength * 2;
+            if (maxLength && text && text.length >= maxLength) {
+                text = text.substr(0, maxLength - "...".length) + "...";
+            }
+            tracing.push(tracing.Phase.Check, "checkExpression", { kind: node.kind, pos: node.pos, end: node.end, path: (node as TracingNode).tracingPath, text });
+        }
         const saveCurrentNode = currentNode;
         currentNode = node;
         instantiationCount = 0;
