@@ -14399,7 +14399,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 const identity = getRecursionIdentity(t);
                 if (stack.length < 10 || stack.length < 50 && !contains(stack, identity)) {
                     stack.push(identity);
+                    // ypresto patch
+                    tracing?.push(tracing.Phase.CheckTypes, "computeBaseConstraint", {
+                        id: t.id,
+                        name: (type.aliasSymbol ?? type.symbol)?.escapedName.toString(),
+                    });
                     result = computeBaseConstraint(getSimplifiedType(t, /*writing*/ false));
+                    tracing?.pop()
                     stack.pop();
                 }
                 if (!popTypeResolution()) {
@@ -19905,8 +19911,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     id: checkType.id,
                     path: getSourceFileOfNode(root.node).path,
                     pos: root.node.pos, end: root.node.end,
-                    name: getTextOfNode(root.node),
-                    // TODO: show distributionType
+                    text: getTextOfNode(root.node),
                 });
 
                 const distributionType = root.isDistributive ? getReducedType(getMappedType(checkType, newMapper)) : undefined;
@@ -19917,7 +19922,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     mapTypeWithAlias(distributionType, t => getConditionalType(root, prependTypeMapping(checkType, t, newMapper), forConstraint), aliasSymbol, aliasTypeArguments) :
                     getConditionalType(root, newMapper, forConstraint, aliasSymbol, aliasTypeArguments);
 
-                tracing?.pop();
+                tracing?.pop({ distributionTypeName: distributionType?.aliasSymbol?.escapedName.toString(), distributionTypeLength: (distributionType?.flags ?? 0) & TypeFlags.Union ? (distributionType as UnionType).types.length : null });
 
                 root.instantiations!.set(id, result);
             }
@@ -19947,6 +19952,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         totalInstantiationCount++;
         instantiationCount++;
         instantiationDepth++;
+        // ypresto patch
         tracing?.push(tracing.Phase.CheckTypes, "instantiateTypeWorker", {
             id: type.id,
             name: (type.aliasSymbol ?? type.symbol)?.escapedName.toString(),
@@ -33797,6 +33803,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function hasCorrectArity(node: CallLikeExpression, args: readonly Expression[], signature: Signature, signatureHelpTrailingComma = false) {
+        tracing?.push(tracing.Phase.Check, "hasCorrectArity");
+        const result = _hasCorrectArity(node, args, signature, signatureHelpTrailingComma);
+        tracing?.pop()
+        return result
+    }
+
+    function _hasCorrectArity(node: CallLikeExpression, args: readonly Expression[], signature: Signature, signatureHelpTrailingComma = false) {
         let argCount: number;
         let callIsIncomplete = false; // In incomplete call we want to be lenient when we have too few arguments
         let effectiveParameterCount = getParameterCount(signature);
@@ -34888,6 +34901,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
             for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
                 const candidate = candidates[candidateIndex];
+
+                // ypresto patch: pop trace of previous iteration
+                if (candidateIndex > 0) tracing?.pop();
+                tracing?.push(tracing.Phase.Check, "chooseOverload-candidate", {
+                    candidateIndex,
+                    signature: candidate.declaration ? getTextOfNode(candidate.declaration) : "(unknown)",
+                    pos: candidate.declaration?.pos, end: candidate.declaration?.end,
+                });
+
                 if (!hasCorrectTypeArgumentArity(candidate, typeArguments) || !hasCorrectArity(node, args, candidate, signatureHelpTrailingComma)) {
                     continue;
                 }
@@ -34947,9 +34969,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     }
                 }
                 candidates[candidateIndex] = checkCandidate;
+                tracing?.pop(); // ypresto patch
                 return checkCandidate;
             }
 
+            tracing?.pop(); // ypresto patch
             return undefined;
         }
     }
@@ -46592,7 +46616,17 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const saveCurrentNode = currentNode;
             currentNode = node;
             instantiationCount = 0;
+            // ypresto patch
+            if (tracing) {
+                let text = getTextOfNode(node)
+                const maxLength = defaultMaximumTruncationLength * 2;
+                if (maxLength && text && text.length >= maxLength) {
+                    text = text.substr(0, maxLength - "...".length) + "...";
+                }
+                tracing.push(tracing.Phase.Check, "checkSourceElement", { kind: node.kind, pos: node.pos, end: node.end, path: (node as TracingNode).tracingPath, text });
+            }
             checkSourceElementWorker(node);
+            tracing?.pop({ instantiationCount })
             currentNode = saveCurrentNode;
         }
     }
@@ -46933,7 +46967,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function checkDeferredNode(node: Node) {
-        tracing?.push(tracing.Phase.Check, "checkDeferredNode", { kind: node.kind, pos: node.pos, end: node.end, path: (node as TracingNode).tracingPath });
+        // ypresto patch
+        // tracing?.push(tracing.Phase.Check, "checkDeferredNode", { kind: node.kind, pos: node.pos, end: node.end, path: (node as TracingNode).tracingPath });
+        if (tracing) {
+            let text = getTextOfNode(node)
+            const maxLength = defaultMaximumTruncationLength * 2;
+            if (maxLength && text && text.length >= maxLength) {
+                text = text.substr(0, maxLength - "...".length) + "...";
+            }
+            tracing.push(tracing.Phase.Check, "checkDeferredNode", { kind: node.kind, pos: node.pos, end: node.end, path: (node as TracingNode).tracingPath, text });
+        }
         const saveCurrentNode = currentNode;
         currentNode = node;
         instantiationCount = 0;
@@ -46985,7 +47028,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 break;
         }
         currentNode = saveCurrentNode;
-        tracing?.pop();
+        // ypresto patch: add arg
+        tracing?.pop({ instantiationCount });
     }
 
     function checkSourceFile(node: SourceFile) {

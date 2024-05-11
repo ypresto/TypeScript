@@ -170,7 +170,8 @@ export namespace tracingEnabled {
         eventStack.length = 0;
     }
     // sample every 10ms
-    const sampleInterval = 1000 * 10;
+    // ypresto patch: changed to 1ms
+    const sampleInterval = 1000 * 1;
     function writeStackEvent(index: number, endTime: number, results?: Args) {
         const { phase, name, args, time, separateBeginAndEnd } = eventStack[index];
         if (separateBeginAndEnd) {
